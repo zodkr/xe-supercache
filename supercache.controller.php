@@ -183,21 +183,67 @@ class SuperCacheController extends SuperCache
 			return;
 		}
 
+		if (is_array($args->module_srl) === true)
+		{
+			$origin_module_srl = end($args->module_srl);
+		}
+
 		// Normalize module_srl into a single number.
 		if (is_array($args->module_srl) && count($args->module_srl) === 1)
 		{
-			$args->module_srl = reset($args->module_srl);
+			$args->module_srl = array($args->module_srl);
+		}
+
+		if (is_array($args->category_srl) === true)
+		{
+			$include_map = array_flip($args->module_srl);
+			foreach($include_map as $module_srl => $val) {
+				$category_srl_lists = array_keys($oDocumentModel->getCategoryList($module_srl));
+				$include_map[$module_srl] = array_filter($category_srl_lists, function ($v) use ($args) {
+					return in_array($v, $args->category_srl);
+				});
+			}
 		}
 
 		// Abort if the module is excluded by configuration.
 		if (!$args->module_srl || isset($config->paging_cache_exclude_modules[$args->module_srl]))
 		{
-			return;
+			$config->paging_cache_exclude_modules = array_flip($config->paging_cache_exclude_modules);
+
+			foreach ($args->module_srl as $key => $val) {
+				if (isset($config->paging_cache_exclude_modules[$val])) {
+					unset($args->module_srl[$key]);
+				}
+			}
+
+			if (count($args->module_srl) < 1) {
+				return;
+			}
 		}
 
 		// Abort if the module/category has fewer documents than the threshold.
 		$oModel = getModel('supercache');
-		$document_count = $oModel->getDocumentCount($args->module_srl, $args->category_srl);
+
+		$document_count = 0;
+
+		// 하나의 모듈에 다수의 게시판. 카테고리 선택X
+		if (isset($include_map)) {
+			foreach ($include_map as $module_srl => $category_list) {
+				if (is_array($category_list) && count($category_list) > 0) {
+					foreach ($category_list as $category_srl) {
+						$document_count += $oModel->getDocumentCount($module_srl, $category_srl);
+					}
+				} else {
+					$document_count += $oModel->getDocumentCount($module_srl, null);
+				}
+			}
+		} else {
+			foreach ($args->module_srl as $module_srl) {
+				$document_count += $oModel->getDocumentCount($module_srl, $args->category_srl);
+			}
+		}
+
+		// $document_count = $oModel->getDocumentCount($args->module_srl, $args->category_srl);
 		if ($document_count < $config->paging_cache_threshold)
 		{
 			return;
